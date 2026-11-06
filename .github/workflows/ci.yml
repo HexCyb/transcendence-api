@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: build + tests (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_POSTGRES: Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=postgres
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore TranscendenceApi.slnx
+      - name: Build (warnings are errors)
+        run: dotnet build TranscendenceApi.slnx --configuration Release --no-restore
+      - name: Unit + integration tests
+        run: dotnet test TranscendenceApi.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+
+  docker:
+    name: docker compose stack (register, log in, profile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secrets for this run only
+        run: printf 'POSTGRES_PASSWORD=%s\nJWT_KEY=%s\n' "$(openssl rand -hex 16)" "$(openssl rand -hex 32)" > .env
+      - name: Build the image and start PostgreSQL + API
+        run: docker compose up -d --build --wait
+      - name: API is healthy
+        run: |
+          for i in $(seq 1 60); do
+            if [ "$(curl -s http://localhost:8080/health)" = Healthy ]; then echo "healthy after $i s"; exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Register, log in, read the profile with the token
+        run: |
+          json='Content-Type: application/json'
+          body='{"username":"ci_player","password":"ci-password-123"}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$json" -d "$body" http://localhost:8080/api/auth/register)" = 201
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$json" -d "$body" http://localhost:8080/api/auth/register)" = 409
+          token=$(curl -sf -X POST -H "$json" -d "$body" http://localhost:8080/api/auth/login | python3 -c 'import json, sys; print(json.load(sys.stdin)["accessToken"])')
+          curl -sf -H "Authorization: Bearer $token" http://localhost:8080/api/users/me | tee me.json
+          python3 -c 'import json; me = json.load(open("me.json")); assert me["username"] == "ci_player" and me["rating"] == 1000, me'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/users/me)" = 401
+      - name: Logs
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
