@@ -1,0 +1,31 @@
+# docker compose up -d --build   (reads POSTGRES_PASSWORD and JWT_KEY from .env)
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: transcendence
+      POSTGRES_USER: transcendence
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transcendence -d transcendence"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Default: "Host=db;Database=transcendence;Username=transcendence;Password=${POSTGRES_PASSWORD}"
+      Jwt__Key: "${JWT_KEY:?set JWT_KEY in .env, at least 32 characters}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+volumes:
+  db-data:
