@@ -25,8 +25,8 @@ jobs:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - name: Restore
@@ -40,7 +40,7 @@ jobs:
     name: docker compose stack (register, log in, profile)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Secrets for this run only
         run: printf 'POSTGRES_PASSWORD=%s\nJWT_KEY=%s\n' "$(openssl rand -hex 16)" "$(openssl rand -hex 32)" > .env
       - name: Build the image and start PostgreSQL + API
